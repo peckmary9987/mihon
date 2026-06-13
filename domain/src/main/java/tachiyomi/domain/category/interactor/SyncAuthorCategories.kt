@@ -8,86 +8,136 @@ class SyncAuthorCategories(
     private val categoryRepository: CategoryRepository,
     private val mangaRepository: MangaRepository,
 ) {
-    // Author categories use IDs starting from -10000 to avoid conflicts
     companion object {
         const val AUTHOR_CATEGORY_ID_START = -10000L
         const val UNKNOWN_AUTHOR_ID = -9999L
+
+        /**
+         * Extract main author name by removing content in parentheses/brackets
+         * "作者名（别名）" -> "作者名"
+         * "作者名(Alias)" -> "作者名"
+         * "作者名[Note]" -> "作者名"
+         */
+        fun normalizeAuthor(author: String): String {
+            var result = author.trim()
+            // Remove content in various bracket types
+            result = result.replace(Regex("[（(\\[【].*[）)\\]】]"), "")
+            // Remove trailing comma/semicolon
+            result = result.replace(Regex("[,;，；]\\s*$"), "")
+            // Trim and capitalize
+            result = result.trim()
+            return if (result.isEmpty()) author.trim() else result
+        }
     }
 
     suspend fun sync() {
-        // Get all distinct authors from favorite manga
-        val authors = mangaRepository.getDistinctAuthors()
+        // Get all favorite manga with author info
+        val favorites = mangaRepository.getFavorites()
 
-        // Get all existing categories
+        // Build author mapping: normalized -> list of (mangaId, originalAuthor)
+        val authorMangaMap = mutableMapOf<String, MutableList<Pair<Long, String>>>()
+
+        favorites.forEach { manga ->
+            val author = manga.author?.trim()
+            if (!author.isNullOrEmpty()) {
+                val normalized = normalizeAuthor(author).lowercase()
+                authorMangaMap.getOrPut(normalized) { mutableListOf() }
+                    .add(manga.id to author)
+            } else {
+                // No author - add to unknown group
+                authorMangaMap.getOrPut("") { mutableListOf() }
+                    .add(manga.id to "")
+            }
+        }
+
+        // Get existing categories
         val existingCategories = categoryRepository.getAll()
-
-        // Find existing author categories (negative IDs)
         val existingAuthorCategories = existingCategories.filter { it.id <= UNKNOWN_AUTHOR_ID }
-
-        // Create a map of existing author names (lowercase) to category IDs
         val existingAuthorMap = existingAuthorCategories.associateBy {
             it.name.lowercase().trim()
         }
 
-        // Track which authors we've processed
-        val processedAuthors = mutableSetOf<String>()
+        // Process each author group
+        var categoryId = AUTHOR_CATEGORY_ID_START
+        val processedAuthorNames = mutableSetOf<String>()
 
-        // Create or update author categories
-        authors.forEachIndexed { index, author ->
-            val normalizedAuthor = author.lowercase().trim()
-            processedAuthors.add(normalizedAuthor)
+        authorMangaMap.forEach { (normalizedAuthor, mangaPairs) ->
+            if (normalizedAuthor.isEmpty()) {
+                // Handle unknown author
+                processedAuthorNames.add("")
+                val existingId = existingAuthorMap[""]?.id ?: UNKNOWN_AUTHOR_ID
 
-            val categoryId = AUTHOR_CATEGORY_ID_START - index
-            val displayName = author.split(" ").joinToString(" ") { word ->
-                word.replaceFirstChar { it.uppercase() }
+                // Ensure unknown author category exists
+                if ("" !in existingAuthorMap) {
+                    categoryRepository.insert(
+                        Category(
+                            id = UNKNOWN_AUTHOR_ID,
+                            name = "Unknown author",
+                            order = UNKNOWN_AUTHOR_ID,
+                            flags = 0L,
+                        )
+                    )
+                }
+
+                // Assign manga to unknown author category
+                mangaPairs.forEach { (mangaId, _) ->
+                    assignMangaToCategory(mangaId, existingId)
+                }
+                return@forEach
             }
 
-            if (normalizedAuthor !in existingAuthorMap) {
-                // Create new author category
+            processedAuthorNames.add(normalizedAuthor)
+
+            // Get display name (use the longest original name for better display)
+            val displayName = mangaPairs.map { it.second }
+                .distinct()
+                .maxByOrNull { it.length }
+                ?.let { capitalizeName(normalizeAuthor(it)) }
+                ?: capitalizeName(normalizedAuthor)
+
+            // Find or create category
+            val existingCategoryId = existingAuthorMap[normalizedAuthor]?.id
+            val catId = existingCategoryId ?: run {
+                val newId = categoryId--
                 categoryRepository.insert(
                     Category(
-                        id = categoryId,
+                        id = newId,
                         name = displayName,
-                        order = categoryId,
+                        order = newId,
                         flags = 0L,
                     )
                 )
+                newId
+            }
+
+            // Assign all manga in this group to the category
+            mangaPairs.forEach { (mangaId, _) ->
+                assignMangaToCategory(mangaId, catId)
             }
         }
 
-        // Remove author categories that no longer have any manga
+        // Remove author categories that no longer have manga
         existingAuthorCategories.forEach { category ->
-            val authorName = category.name.lowercase().trim()
-            if (authorName !in processedAuthors) {
-                // Delete the category and its associations
+            val normalizedName = category.name.lowercase().trim()
+            if (normalizedName !in processedAuthorNames && category.id != UNKNOWN_AUTHOR_ID) {
                 categoryRepository.delete(category.id)
             }
         }
+    }
 
-        // Update manga-category associations
-        val allCategories = categoryRepository.getAll()
-        val authorCategoryMap = allCategories
-            .filter { it.id <= UNKNOWN_AUTHOR_ID }
-            .associateBy { it.name.lowercase().trim() }
+    private suspend fun assignMangaToCategory(mangaId: Long, categoryId: Long) {
+        val currentCategories = categoryRepository.getCategoriesByMangaId(mangaId)
+        val currentCategoryIds = currentCategories.map { it.id }.toMutableList()
 
-        // For each author, get their manga and update categories
-        authors.forEach { author ->
-            val normalizedAuthor = author.lowercase().trim()
-            val categoryId = authorCategoryMap[normalizedAuthor]?.id ?: return@forEach
+        if (categoryId !in currentCategoryIds) {
+            currentCategoryIds.add(categoryId)
+            mangaRepository.setMangaCategories(mangaId, currentCategoryIds)
+        }
+    }
 
-            val mangaIds = mangaRepository.getMangaIdsByAuthor(author)
-
-            mangaIds.forEach { mangaId ->
-                // Get current categories for this manga
-                val currentCategories = categoryRepository.getCategoriesByMangaId(mangaId)
-                val currentCategoryIds = currentCategories.map { it.id }.toMutableList()
-
-                // Add author category if not already present
-                if (categoryId !in currentCategoryIds) {
-                    currentCategoryIds.add(categoryId)
-                    mangaRepository.setMangaCategories(mangaId, currentCategoryIds)
-                }
-            }
+    private fun capitalizeName(name: String): String {
+        return name.split(" ").joinToString(" ") { word ->
+            word.replaceFirstChar { it.uppercase() }
         }
     }
 
