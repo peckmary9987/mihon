@@ -7,11 +7,11 @@ CREATE TABLE categories(
 
 -- Insert system category
 INSERT OR IGNORE INTO categories(_id, name, sort, flags) VALUES (0, "", -1, 0);
--- Disallow deletion of default category
+-- Disallow deletion of default category (only protect id=0, allow negative ids for author categories)
 CREATE TRIGGER IF NOT EXISTS system_category_delete_trigger BEFORE DELETE
 ON categories
 BEGIN SELECT CASE
-    WHEN old._id <= 0 THEN
+    WHEN old._id = 0 THEN
         RAISE(ABORT, "System category can't be deleted")
     END;
 END;
@@ -45,6 +45,10 @@ WHERE MC.manga_id = :mangaId;
 insert:
 INSERT INTO categories(name, sort, flags)
 VALUES (:name, :order, :flags);
+
+insertWithId:
+INSERT INTO categories(_id, name, sort, flags)
+VALUES (:id, :name, :order, :flags);
 
 delete:
 DELETE FROM categories

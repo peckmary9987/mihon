@@ -51,6 +51,15 @@ class CategoryRepositoryImpl(
         )
     }
 
+    override suspend fun insertWithId(category: Category) {
+        database.categoriesQueries.insertWithId(
+            id = category.id,
+            name = category.name,
+            order = category.order,
+            flags = category.flags,
+        )
+    }
+
     override suspend fun updatePartial(update: CategoryUpdate) {
         database.categoriesQueries.update(
             name = update.name,

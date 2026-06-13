@@ -69,7 +69,7 @@ class SyncAuthorCategories(
 
                 // Ensure unknown author category exists
                 if ("" !in existingAuthorMap) {
-                    categoryRepository.insert(
+                    categoryRepository.insertWithId(
                         Category(
                             id = UNKNOWN_AUTHOR_ID,
                             name = "Unknown author",
@@ -99,7 +99,7 @@ class SyncAuthorCategories(
             val existingCategoryId = existingAuthorMap[normalizedAuthor]?.id
             val catId = existingCategoryId ?: run {
                 val newId = categoryId--
-                categoryRepository.insert(
+                categoryRepository.insertWithId(
                     Category(
                         id = newId,
                         name = displayName,
