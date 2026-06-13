@@ -129,6 +129,8 @@
     <string name="action_display_show_tabs">Show category tabs</string>
     <string name="action_display_show_number_of_items">Show number of items</string>
     <string name="action_display_show_continue_reading_button">Continue reading button</string>
+    <string name="action_display_enable_author_category">Enable author category</string>
+    <string name="label_unknown_author">Unknown author</string>
     <string name="action_disable">Disable</string>
     <string name="action_pin">Pin</string>
     <string name="action_unpin">Unpin</string>

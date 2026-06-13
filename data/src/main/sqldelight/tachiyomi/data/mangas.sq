@@ -260,3 +260,18 @@ insertNetworkManga {
     AND url = :url
     LIMIT 1;
 }
+
+-- Get distinct authors from favorite manga (case-insensitive)
+getDistinctAuthors:
+SELECT DISTINCT lower(trim(author)) AS author
+FROM mangas
+WHERE favorite = 1
+AND author IS NOT NULL
+AND trim(author) != '';
+
+-- Get manga IDs by author (case-insensitive)
+getMangaIdsByAuthor:
+SELECT _id
+FROM mangas
+WHERE favorite = 1
+AND lower(trim(author)) = lower(trim(:author));

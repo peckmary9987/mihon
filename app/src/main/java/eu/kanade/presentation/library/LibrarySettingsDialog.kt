@@ -295,4 +295,10 @@ private fun ColumnScope.DisplayPage(
         label = stringResource(MR.strings.action_display_show_number_of_items),
         pref = screenModel.libraryPreferences.categoryNumberOfItems,
     )
+
+    HeadingItem(MR.strings.categories)
+    CheckboxItem(
+        label = stringResource(MR.strings.action_display_enable_author_category),
+        pref = screenModel.libraryPreferences.enableAuthorCategory,
+    )
 }

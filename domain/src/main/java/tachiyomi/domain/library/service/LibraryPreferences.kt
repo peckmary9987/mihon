@@ -132,6 +132,8 @@ class LibraryPreferences(
 
     val categorizedDisplaySettings: Preference<Boolean> = preferenceStore.getBoolean("categorized_display", false)
 
+    val enableAuthorCategory: Preference<Boolean> = preferenceStore.getBoolean("library_enable_author_category", false)
+
     val updateCategories: Preference<Set<String>> = preferenceStore.getStringSet(
         LIBRARY_UPDATE_CATEGORIES_PREF_KEY,
         emptySet(),

@@ -44,6 +44,7 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.SetMangaCategories
+import tachiyomi.domain.category.interactor.SyncAuthorCategories
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
@@ -76,6 +77,7 @@ class LibraryScreenModel(
     private val setReadStatus: SetReadStatus = Injekt.get(),
     private val updateManga: UpdateManga = Injekt.get(),
     private val setMangaCategories: SetMangaCategories = Injekt.get(),
+    private val syncAuthorCategories: SyncAuthorCategories = Injekt.get(),
     private val preferences: BasePreferences = Injekt.get(),
     private val libraryPreferences: LibraryPreferences = Injekt.get(),
     private val coverCache: CoverCache = Injekt.get(),
@@ -89,6 +91,23 @@ class LibraryScreenModel(
         mutableState.update { state ->
             state.copy(activeCategoryIndex = libraryPreferences.lastUsedCategory.get())
         }
+
+        // Sync author categories when enabled
+        screenModelScope.launchIO {
+            libraryPreferences.enableAuthorCategory.changes()
+                .collectLatest { enabled ->
+                    if (enabled) {
+                        syncAuthorCategories.sync()
+                    }
+                    // Trigger library refresh
+                    mutableState.update { state ->
+                        state.copy(
+                            libraryData = state.libraryData.copy(enableAuthorCategory = enabled),
+                        )
+                    }
+                }
+        }
+
         screenModelScope.launchIO {
             combine(
                 state.map { it.searchQuery }.distinctUntilChanged().debounce(SEARCH_DEBOUNCE_MILLIS),
@@ -109,6 +128,7 @@ class LibraryScreenModel(
                     favorites = filteredFavorites,
                     tracksMap = tracksMap,
                     loggedInTrackerIds = trackingFilters.keys,
+                    enableAuthorCategory = libraryPreferences.enableAuthorCategory.get(),
                 )
             }
                 .distinctUntilChanged()
@@ -126,7 +146,7 @@ class LibraryScreenModel(
                 .distinctUntilChanged()
                 .map { data ->
                     data.favorites
-                        .applyGrouping(data.categories, data.showSystemCategory)
+                        .applyGrouping(data.categories, data.showSystemCategory, data.enableAuthorCategory)
                         .applySort(data.favoritesById, data.tracksMap, data.loggedInTrackerIds)
                 }
                 .collectLatest {
@@ -252,6 +272,7 @@ class LibraryScreenModel(
     private fun List<LibraryItem>.applyGrouping(
         categories: List<Category>,
         showSystemCategory: Boolean,
+        enableAuthorCategory: Boolean = false,
     ): Map<Category, List</* LibraryItem */ Long>> {
         val groupCache = mutableMapOf</* Category */ Long, MutableList</* LibraryItem */ Long>>()
         forEach { item ->
@@ -259,8 +280,19 @@ class LibraryScreenModel(
                 groupCache.getOrPut(categoryId) { mutableListOf() }.add(item.id)
             }
         }
-        return categories.filter { showSystemCategory || !it.isSystemCategory }
-            .associateWith { groupCache[it.id]?.toList().orEmpty() }
+
+        return if (enableAuthorCategory) {
+            // Only show author categories (ID <= -9999)
+            categories.filter { it.id <= SyncAuthorCategories.UNKNOWN_AUTHOR_ID }
+                .associateWith { groupCache[it.id]?.toList().orEmpty() }
+        } else {
+            // Show normal categories, exclude author categories
+            categories.filter {
+                (showSystemCategory || !it.isSystemCategory) &&
+                    it.id > SyncAuthorCategories.UNKNOWN_AUTHOR_ID
+            }
+                .associateWith { groupCache[it.id]?.toList().orEmpty() }
+        }
     }
 
     private fun Map<Category, List</* LibraryItem */ Long>>.applySort(
@@ -755,6 +787,7 @@ class LibraryScreenModel(
         val favorites: List<LibraryItem> = emptyList(),
         val tracksMap: Map</* Manga */ Long, List<Track>> = emptyMap(),
         val loggedInTrackerIds: Set<Long> = emptySet(),
+        val enableAuthorCategory: Boolean = false,
     ) {
         val favoritesById by lazy { favorites.associateBy { it.id } }
     }

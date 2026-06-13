@@ -195,4 +195,16 @@ class MangaRepositoryImpl(
             }
         }
     }
+
+    override suspend fun getDistinctAuthors(): List<String> {
+        return database.mangasQueries
+            .getDistinctAuthors { author -> author ?: "" }
+            .awaitAsList()
+    }
+
+    override suspend fun getMangaIdsByAuthor(author: String): List<Long> {
+        return database.mangasQueries
+            .getMangaIdsByAuthor(author)
+            .awaitAsList()
+    }
 }
