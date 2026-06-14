@@ -108,6 +108,39 @@ class LibraryScreenModel(
                 }
         }
 
+        // Listen for library changes and update author categories incrementally
+        screenModelScope.launchIO {
+            var previousFavorites = setOf<Long>()
+
+            getLibraryManga.subscribe()
+                .collectLatest { currentFavorites ->
+                    val isEnabled = libraryPreferences.enableAuthorCategory.get()
+                    if (!isEnabled) return@collectLatest
+
+                    val currentIds = currentFavorites.map { it.id }.toSet()
+
+                    // Find new manga (added to library)
+                    val newMangaIds = currentIds - previousFavorites
+                    // Find removed manga
+                    val removedMangaIds = previousFavorites - currentIds
+
+                    // Update new manga
+                    newMangaIds.forEach { mangaId ->
+                        val manga = currentFavorites.find { it.id == mangaId }
+                        if (manga != null) {
+                            syncAuthorCategories.syncManga(mangaId, manga.manga.author)
+                        }
+                    }
+
+                    // Remove old manga
+                    removedMangaIds.forEach { mangaId ->
+                        syncAuthorCategories.removeManga(mangaId)
+                    }
+
+                    previousFavorites = currentIds
+                }
+        }
+
         screenModelScope.launchIO {
             combine(
                 state.map { it.searchQuery }.distinctUntilChanged().debounce(SEARCH_DEBOUNCE_MILLIS),

@@ -162,6 +162,94 @@ class SyncAuthorCategories(
         }
     }
 
+    /**
+     * Update author category for a single manga
+     * Called when manga info changes or manga is added/removed from library
+     */
+    suspend fun syncManga(mangaId: Long, author: String?) {
+        try {
+            val normalizedAuthor = if (author.isNullOrBlank()) {
+                ""
+            } else {
+                normalizeAuthor(author).lowercase()
+            }
+
+            val existingCategories = categoryRepository.getAll()
+            val existingAuthorCategories = existingCategories.filter { it.id <= UNKNOWN_AUTHOR_ID }
+            val existingAuthorMap = existingAuthorCategories.associateBy {
+                it.name.lowercase().trim()
+            }
+
+            // Find or create category for this author
+            val categoryId = if (normalizedAuthor.isEmpty()) {
+                UNKNOWN_AUTHOR_ID.also {
+                    // Ensure unknown author category exists
+                    if ("" !in existingAuthorMap) {
+                        categoryRepository.insertWithId(
+                            Category(
+                                id = UNKNOWN_AUTHOR_ID,
+                                name = "Unknown author",
+                                order = UNKNOWN_AUTHOR_ID,
+                                flags = 0L,
+                            )
+                        )
+                    }
+                }
+            } else {
+                existingAuthorMap[normalizedAuthor]?.id ?: run {
+                    // Create new category
+                    val existingIds = existingAuthorCategories.map { it.id }.toSet()
+                    var newId = if (existingIds.isEmpty()) {
+                        AUTHOR_CATEGORY_ID_START
+                    } else {
+                        (existingIds.min() - 1).coerceAtMost(AUTHOR_CATEGORY_ID_START)
+                    }
+                    while (newId in existingIds) {
+                        newId--
+                    }
+
+                    val displayName = capitalizeName(normalizeAuthor(author!!))
+                    categoryRepository.insertWithId(
+                        Category(
+                            id = newId,
+                            name = displayName,
+                            order = newId,
+                            flags = 0L,
+                        )
+                    )
+                    newId
+                }
+            }
+
+            // Update manga's categories
+            assignMangaToCategory(mangaId, categoryId)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Remove manga from all author categories
+     * Called when manga is removed from library
+     */
+    suspend fun removeManga(mangaId: Long) {
+        try {
+            val currentCategories = categoryRepository.getCategoriesByMangaId(mangaId)
+            val authorCategoryIds = currentCategories
+                .filter { it.id <= UNKNOWN_AUTHOR_ID }
+                .map { it.id }
+
+            if (authorCategoryIds.isNotEmpty()) {
+                val remainingCategories = currentCategories
+                    .filter { it.id > UNKNOWN_AUTHOR_ID }
+                    .map { it.id }
+                mangaRepository.setMangaCategories(mangaId, remainingCategories)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     suspend fun getAuthorCategories(): List<Category> {
         return categoryRepository.getAll().filter { it.id <= UNKNOWN_AUTHOR_ID }
     }

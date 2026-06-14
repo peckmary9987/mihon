@@ -4,6 +4,7 @@ import eu.kanade.domain.manga.model.hasCustomCover
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.model.SManga
+import tachiyomi.domain.category.interactor.SyncAuthorCategories
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.FetchInterval
 import tachiyomi.domain.manga.model.Manga
@@ -18,6 +19,7 @@ import java.time.ZonedDateTime
 class UpdateManga(
     private val mangaRepository: MangaRepository,
     private val fetchInterval: FetchInterval,
+    private val syncAuthorCategories: SyncAuthorCategories = Injekt.get(),
 ) {
 
     suspend fun await(mangaUpdate: MangaUpdate): Boolean {
@@ -86,6 +88,12 @@ class UpdateManga(
         if (success && title != null) {
             downloadManager.renameManga(localManga, title)
         }
+
+        // Update author category if author changed and manga is in library
+        if (success && localManga.favorite && remoteManga.author != localManga.author) {
+            syncAuthorCategories.syncManga(localManga.id, remoteManga.author)
+        }
+
         return success
     }
 
