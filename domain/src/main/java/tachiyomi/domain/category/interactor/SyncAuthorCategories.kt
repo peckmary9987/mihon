@@ -31,6 +31,15 @@ class SyncAuthorCategories(
     }
 
     suspend fun sync() {
+        try {
+            syncInternal()
+        } catch (e: Exception) {
+            // Log error but don't crash
+            e.printStackTrace()
+        }
+    }
+
+    private suspend fun syncInternal() {
         // Get all favorite manga with author info
         val favorites = mangaRepository.getFavorites()
 
@@ -57,8 +66,16 @@ class SyncAuthorCategories(
             it.name.lowercase().trim()
         }
 
+        // Find the minimum existing author category ID to avoid conflicts
+        val existingIds = existingAuthorCategories.map { it.id }.toSet()
+        var nextCategoryId = if (existingIds.isEmpty()) {
+            AUTHOR_CATEGORY_ID_START
+        } else {
+            // Start from the minimum existing ID - 1
+            (existingIds.min() - 1).coerceAtMost(AUTHOR_CATEGORY_ID_START)
+        }
+
         // Process each author group
-        var categoryId = AUTHOR_CATEGORY_ID_START
         val processedAuthorNames = mutableSetOf<String>()
 
         authorMangaMap.forEach { (normalizedAuthor, mangaPairs) ->
@@ -98,7 +115,11 @@ class SyncAuthorCategories(
             // Find or create category
             val existingCategoryId = existingAuthorMap[normalizedAuthor]?.id
             val catId = existingCategoryId ?: run {
-                val newId = categoryId--
+                // Find next available ID
+                while (nextCategoryId in existingIds) {
+                    nextCategoryId--
+                }
+                val newId = nextCategoryId--
                 categoryRepository.insertWithId(
                     Category(
                         id = newId,
