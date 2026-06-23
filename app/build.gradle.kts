@@ -38,11 +38,21 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("debug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "mihon123"
+            keyAlias = "mihon"
+            keyPassword = "mihon123"
+        }
+    }
+
     buildTypes {
         val debug by getting {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-${getLatestCommitCount()}"
             isPseudoLocalesEnabled = true
+            signingConfig = signingConfigs.getByName("debug")
         }
         val release by getting {
             isMinifyEnabled = Config.enableCodeShrink
