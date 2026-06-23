@@ -14,8 +14,8 @@ class SyncAuthorCategories(
 
         /**
          * Extract main author name by removing content in parentheses/brackets
+         * "白金庵 (青水庵、眠井ねず、蜜姫モカ)" -> "白金庵"
          * "規制当局 (リヒャルト・バフマン)" -> "規制当局"
-         * "作者名（别名）" -> "作者名"
          */
         fun extractMainName(author: String): String {
             var result = author.trim()
@@ -28,26 +28,32 @@ class SyncAuthorCategories(
         }
 
         /**
-         * Extract alias from parentheses/brackets
-         * "規制当局 (リヒャルト・バフマン)" -> "リヒャルト・バフマン"
-         * "作者名（别名）" -> "别名"
-         * "作者名" -> null
+         * Extract all aliases from parentheses/brackets (comma separated)
+         * "白金庵 (青水庵、眠井ねず、蜜姫モカ)" -> ["青水庵", "眠井ねず", "蜜姫モカ"]
+         * "規制当局 (リヒャルト・バフマン)" -> ["リヒャルト・バフマン"]
+         * "作者名" -> []
          */
-        fun extractAlias(author: String): String? {
-            val match = Regex("[（(\\[【](.*?)[）)\\]】]").find(author)
-            return match?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+        fun extractAliases(author: String): List<String> {
+            val match = Regex("[（(\\[【](.*?)[）)\\]】]").find(author) ?: return emptyList()
+            val content = match.groupValues[1].trim()
+            if (content.isEmpty()) return emptyList()
+
+            // Split by various comma types: 、,，,, /
+            return content.split(Regex("[、，,/]"))
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
         }
 
         /**
-         * Get all possible names for matching (main name + alias)
-         * "規制当局 (リヒャルト・バフマン)" -> ["規制当局", "リヒャルト・バフマン"]
+         * Get all identifiers for matching (main name + all aliases)
+         * "白金庵 (青水庵、眠井ねず、蜜姫モカ)" -> ["白金庵", "青水庵", "眠井ねず", "蜜姫モカ"]
          */
-        fun getAllNames(author: String): List<String> {
-            val names = mutableListOf<String>()
+        fun getAllIdentifiers(author: String): List<String> {
+            val identifiers = mutableListOf<String>()
             val mainName = extractMainName(author)
-            names.add(mainName.lowercase())
-            extractAlias(author)?.let { names.add(it.lowercase()) }
-            return names.distinct()
+            identifiers.add(mainName)
+            identifiers.addAll(extractAliases(author))
+            return identifiers.distinct()
         }
     }
 
@@ -64,11 +70,11 @@ class SyncAuthorCategories(
         // Get all favorite manga with author info
         val favorites = mangaRepository.getFavorites()
 
-        // Build author groups using alias matching
+        // Build author groups using exact identifier matching
         // Key: canonical name (lowercase), Value: list of (mangaId, originalAuthor)
         val authorGroups = mutableMapOf<String, MutableList<Pair<Long, String>>>()
-        // Map alias to canonical name
-        val aliasToCanonical = mutableMapOf<String, String>()
+        // Map identifier (lowercase) to canonical name
+        val identifierToCanonical = mutableMapOf<String, String>()
 
         favorites.forEach { manga ->
             val author = manga.author?.trim()
@@ -78,24 +84,25 @@ class SyncAuthorCategories(
                 return@forEach
             }
 
-            val allNames = getAllNames(author)
+            val allIdentifiers = getAllIdentifiers(author).map { it.lowercase() }
 
-            // Check if any of the names already has a group
-            val existingCanonical = allNames.firstNotNullOfOrNull { aliasToCanonical[it] }
-                ?: allNames.firstNotNullOfOrNull { authorGroups.keys.find { key -> key == it } }
+            // Check if any identifier already has a group (exact match only)
+            val existingCanonical = allIdentifiers.firstNotNullOfOrNull { id ->
+                identifierToCanonical[id]
+            }
 
             if (existingCanonical != null) {
                 // Add to existing group
                 authorGroups.getOrPut(existingCanonical) { mutableListOf() }
                     .add(manga.id to author)
-                // Map all names to this canonical name
-                allNames.forEach { aliasToCanonical[it] = existingCanonical }
+                // Map all identifiers to this canonical name
+                allIdentifiers.forEach { identifierToCanonical[it] = existingCanonical }
             } else {
                 // Create new group with main name as canonical
                 val canonical = extractMainName(author).lowercase()
                 authorGroups.getOrPut(canonical) { mutableListOf() }
                     .add(manga.id to author)
-                allNames.forEach { aliasToCanonical[it] = canonical }
+                allIdentifiers.forEach { identifierToCanonical[it] = canonical }
             }
         }
 
@@ -220,12 +227,12 @@ class SyncAuthorCategories(
                 it.name.lowercase().trim()
             }
 
-            // Get all possible names for this author
-            val allNames = getAllNames(author)
+            // Get all identifiers for this author (main name + aliases)
+            val allIdentifiers = getAllIdentifiers(author).map { it.lowercase() }
 
-            // Find existing category by checking all names
-            val existingCategoryId = allNames.firstNotNullOfOrNull { name ->
-                existingAuthorMap[name]?.id
+            // Find existing category by exact identifier match
+            val existingCategoryId = allIdentifiers.firstNotNullOfOrNull { id ->
+                existingAuthorMap[id]?.id
             }
 
             val categoryId = existingCategoryId ?: run {
