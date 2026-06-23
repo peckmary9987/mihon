@@ -39,7 +39,7 @@ android {
     }
 
     signingConfigs {
-        create("debug") {
+        getByName("debug") {
             storeFile = rootProject.file("keystore/debug.keystore")
             storePassword = "mihon123"
             keyAlias = "mihon"
@@ -52,7 +52,6 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-${getLatestCommitCount()}"
             isPseudoLocalesEnabled = true
-            signingConfig = signingConfigs.getByName("debug")
         }
         val release by getting {
             isMinifyEnabled = Config.enableCodeShrink
